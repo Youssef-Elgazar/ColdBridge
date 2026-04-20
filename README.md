@@ -12,7 +12,9 @@ as worker instances, giving genuine cold start latency numbers rather than
 simulations.
 
 ### Why Docker (not AWS Lambda)?
+
 Real Docker containers on your local machine give:
+
 - Actual image-pull, runtime-init, and dependency-load latency
 - Fully controlled, reproducible experiments (no external scheduling noise)
 - Real JVM cold starts (~1.5–3 s), Node cold starts (~400–800 ms), Python (~300–600 ms)
@@ -26,10 +28,10 @@ Real Docker containers on your local machine give:
 coldbridge/
 ├── coldbridge/               ← Core library
 │   ├── modules/
-│   │   ├── module_a.py       ← Transformer Pre-Warmer        (Nadira) ✓
-│   │   ├── module_b.py       ← Snapshot Registry stub        (Basant/Youssef)
-│   │   ├── module_c.py       ← Edge-Cloud Orchestrator stub  (Basant/Youssef)
-│   │   └── module_d.py       ← Benchmark Harness             (Nadira) ✓
+│   │   ├── module_a.py       ← Transformer Pre-Warmer        (Youssef) ✓
+│   │   ├── module_b.py       ← Snapshot Registry stub        (Basant)
+│   │   ├── module_c.py       ← Edge-Cloud Orchestrator stub  (Nadira)
+│   │   └── module_d.py       ← Benchmark Harness             (Youssef) ✓
 │   ├── worker/
 │   │   └── pool.py           ← DockerWorkerPool + adapter interface
 │   ├── metrics/
@@ -58,18 +60,22 @@ coldbridge/
 ## Quick Start (Windows)
 
 ### 1. Prerequisites
+
 - Python 3.11+ — https://python.org
 - Docker Desktop — https://docker.com/products/docker-desktop  
-  *(WSL2 is optional — not required)*
+  _(WSL2 is optional — not required)_
 
 ### 2. Setup (run once)
+
 ```bat
 setup.bat
 ```
+
 This creates a virtual environment, installs dependencies, and builds all
 three Docker worker images.
 
 ### 3. Activate environment
+
 ```bat
 .venv\Scripts\activate
 ```
@@ -97,13 +103,13 @@ python -m experiments.plot_results --results_dir results/
 
 ## Experiment Modes
 
-| Mode        | Module A | Module B | Module C | Description                          |
-|-------------|----------|----------|----------|--------------------------------------|
-| `baseline`  | —        | —        | —        | Raw Docker cold starts (ground truth)|
-| `module_a`  | ✓        | —        | —        | Prediction + pre-warming only        |
-| `module_b`  | —        | ✓        | —        | Snapshot restore only                |
-| `module_c`  | —        | —        | ✓        | Edge routing only                    |
-| `full`      | ✓        | ✓        | ✓        | All modules combined                 |
+| Mode       | Module A | Module B | Module C | Description                           |
+| ---------- | -------- | -------- | -------- | ------------------------------------- |
+| `baseline` | —        | —        | —        | Raw Docker cold starts (ground truth) |
+| `module_a` | ✓        | —        | —        | Prediction + pre-warming only         |
+| `module_b` | —        | ✓        | —        | Snapshot restore only                 |
+| `module_c` | —        | —        | ✓        | Edge routing only                     |
+| `full`     | ✓        | ✓        | ✓        | All modules combined                  |
 
 Add `--skip_b` or `--skip_c` to any mode to disable those stubs while your
 teammates are still implementing.
@@ -143,12 +149,12 @@ python -m experiments.plot_results [OPTIONS]
 
 Each run writes to `results/<timestamp>_<mode>/`:
 
-| File               | Contents                                                  |
-|--------------------|-----------------------------------------------------------|
-| `metrics.json`     | All quantitative metrics per function                     |
-| `cold_starts.csv`  | Per-invocation log: timestamp, function, cold/warm, ms   |
-| `predictions.csv`  | Module A decisions with ground truth labels              |
-| `summary.txt`      | Human-readable text report                               |
+| File              | Contents                                               |
+| ----------------- | ------------------------------------------------------ |
+| `metrics.json`    | All quantitative metrics per function                  |
+| `cold_starts.csv` | Per-invocation log: timestamp, function, cold/warm, ms |
+| `predictions.csv` | Module A decisions with ground truth labels            |
+| `summary.txt`     | Human-readable text report                             |
 
 `results/comparison.json` is written by the `compare` command.
 
@@ -173,6 +179,7 @@ When you're ready to integrate your module, replace the stub in
 implementation. The interface is minimal:
 
 **Module B** must implement:
+
 ```python
 def snapshot(self, function_name: str, container_id: str) -> Optional[str]: ...
 def restore(self, function_name: str) -> Optional[WorkerInstance]: ...
@@ -181,6 +188,7 @@ def is_available(self) -> bool: ...
 ```
 
 **Module C** must implement:
+
 ```python
 def route(self, function_name: str) -> str: ...  # returns "edge" or "cloud"
 def is_available(self) -> bool: ...
