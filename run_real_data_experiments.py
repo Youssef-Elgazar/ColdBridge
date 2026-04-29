@@ -27,79 +27,16 @@ from coldbridge.data.real_trace_loaders import (
     ZenodoHuaweiLoader,
     AzureFunctions2019Loader,
 )
+from coldbridge.modules.module_a import ModuleA
 from coldbridge.modules.module_b import ModuleB
 from coldbridge.modules.module_c import ModuleC
 
 
-def _blind_iat_predictor(
-    dt: float,
-    fn_recent_iats: list,
-    hour_of_day: float,
-    fn_invocation_count: int,
-):
-    """
-    Blind IAT-based cold start predictor.
-
-    Uses ONLY features available at prediction time — NO ground truth labels.
-    This models what Module A's Transformer would realistically learn:
-
-    Features:
-      1. dt (inter-arrival time since last invocation of this function)
-      2. Recent IAT statistics (mean, std of last 10 IATs)
-      3. Hour-of-day (cyclical — captures daily patterns)
-      4. Function invocation count so far (captures frequency)
-
-    Returns a probability estimate [0, 1] that the next invocation will be cold.
-    """
-    # Feature 1: IAT-based signal (longer idle → higher cold probability)
-    # Real platforms typically evict containers after 5-15 min idle
-    EVICTION_WINDOW = 600.0  # 10 min — typical cloud provider TTL
-    if dt == np.inf or dt > EVICTION_WINDOW * 3:
-        iat_signal = 0.90  # very long idle — almost certainly cold
-    elif dt > EVICTION_WINDOW:
-        # Graduated: 10-30 min → 0.55 to 0.90
-        iat_signal = 0.55 + 0.35 * min((dt - EVICTION_WINDOW) / (EVICTION_WINDOW * 2), 1.0)
-    elif dt > EVICTION_WINDOW * 0.5:
-        # Getting risky: 5-10 min → 0.25 to 0.55
-        iat_signal = 0.25 + 0.30 * (dt - EVICTION_WINDOW * 0.5) / (EVICTION_WINDOW * 0.5)
-    else:
-        # Recent invocation → likely warm
-        iat_signal = 0.05 + 0.20 * (dt / (EVICTION_WINDOW * 0.5))
-
-    # Feature 2: Recent IAT variability (bursty patterns are harder to predict)
-    if len(fn_recent_iats) >= 3:
-        mean_iat = np.mean(fn_recent_iats)
-        std_iat = np.std(fn_recent_iats)
-        cv = std_iat / max(mean_iat, 1.0)  # coefficient of variation
-        # High CV → bursty → model is less confident
-        burstiness_penalty = min(cv * 0.1, 0.15)
-    else:
-        burstiness_penalty = 0.05  # not enough history → slight uncertainty
-
-    # Feature 3: Hour-of-day (off-peak hours = fewer invocations = higher cold risk)
-    # Simple cyclical model: 2-6 AM is off-peak
-    hour = hour_of_day % 24
-    if 2 <= hour <= 6:
-        time_boost = 0.10  # off-peak, higher cold risk
-    elif 9 <= hour <= 17:
-        time_boost = -0.05  # peak hours, lower cold risk
-    else:
-        time_boost = 0.0
-
-    # Feature 4: Infrequent functions are harder to keep warm
-    if fn_invocation_count < 5:
-        rarity_boost = 0.10
-    elif fn_invocation_count > 100:
-        rarity_boost = -0.05
-    else:
-        rarity_boost = 0.0
-
-    # Combine (clamp to [0.02, 0.98])
-    pred = iat_signal + burstiness_penalty + time_boost + rarity_boost
-    # Add noise to simulate model imperfection (±5%)
-    pred += np.random.normal(0, 0.05)
-    return max(0.02, min(0.98, pred))
-
+class MockResult:
+    def __init__(self, fn, t, was_cold):
+        self.function_name = fn
+        self.timestamp = t
+        self.was_cold = was_cold
 
 def simulate_experiment(
     dataset_name: str,
@@ -107,22 +44,26 @@ def simulate_experiment(
     training_records: list,
     baseline_ttl: float = 600.0,
     seed: int = 42,
+    mode: str = "full",
 ):
     """
     Run discrete-event simulation of Baseline vs ColdBridge for one dataset.
 
-    Baseline: Fixed TTL keep-alive (10 min). Cold start on container miss.
-    ColdBridge: Module A prediction + Module B snapshot + Module C edge routing.
+    Args:
+        mode: 'module_a_only' — only Module A prediction, no B/C fallback.
+              'full' — Module A + B + C combined.
 
-    IMPORTANT: Module A uses a BLIND predictor — it does NOT peek at ground
-    truth labels. It predicts cold starts using only inter-arrival time,
-    recent invocation patterns, and time-of-day features. This ensures the
-    results reflect what a trained model would realistically achieve.
+    Baseline: Fixed TTL keep-alive (10 min). Cold start on container miss.
+    ColdBridge: Module A prediction (+ Module B/C if mode='full').
+
+    IMPORTANT: This now uses the actual PyTorch Transformer in Module A,
+    trained on historical records, processing events causally as a stream.
     """
     np.random.seed(seed)
     random.seed(seed)
 
     n = len(events)
+    mod_a = ModuleA(theta=0.50)
     mod_b = ModuleB()
     mod_c = ModuleC()
 
@@ -176,13 +117,29 @@ def simulate_experiment(
     cb_cold_starts = 0
     cb_lats = []
     cb_idle_cost = 0.0
-    cb_last_invoked = {}     # last invocation timestamp per function
-    fn_iat_history = {}      # recent IATs per function (sliding window of 10)
-    fn_invoke_count = {}     # total invocations per function so far
     inference_log = []
     recent_starts = []
     time_window = 0.5
 
+    # Train Module A on historical records first
+    print("      Training Module A Transformer on historical records...")
+    train_history = []
+    for r in training_records:
+        train_history.append({
+            "function_name": r.function_name,
+            "timestamp": r.timestamp,
+            "was_cold": r.was_cold,
+            "cold_start_latency_ms": r.cold_start_latency_ms,
+        })
+    if train_history:
+        b_size = min(256, max(16, len(train_history) // 10))
+        mod_a.train(train_history, epochs=5, batch_size=b_size)
+
+    # Seed Module A's state with the training events so its history window isn't empty
+    for r in train_history:
+        mod_a.record_invocation(MockResult(r["function_name"], r["timestamp"], r["was_cold"]))
+
+    print("      Running simulation sequence...")
     for i, evt in enumerate(events):
         fn = evt.function_name
         t = evt.scheduled_at
@@ -191,44 +148,33 @@ def simulate_experiment(
         recent_starts = [rt for rt in recent_starts if t - rt < time_window]
         active_count = len(recent_starts)
 
-        # Compute inter-arrival time (blind — no ground truth used)
-        if fn in cb_last_invoked:
-            dt = t - cb_last_invoked[fn]
-        else:
-            dt = np.inf  # first invocation → definitely cold
-
-        # Track IAT history per function
-        if fn not in fn_iat_history:
-            fn_iat_history[fn] = []
-        if dt != np.inf:
-            fn_iat_history[fn].append(dt)
-            if len(fn_iat_history[fn]) > 10:
-                fn_iat_history[fn] = fn_iat_history[fn][-10:]
-
-        fn_invoke_count[fn] = fn_invoke_count.get(fn, 0) + 1
-
-        # Module A: BLIND IAT-based prediction (no ground truth peeking)
-        hour_of_day = (t / 3600.0) % 24.0
-        pred_prob = _blind_iat_predictor(
-            dt=dt,
-            fn_recent_iats=fn_iat_history[fn],
-            hour_of_day=hour_of_day,
-            fn_invocation_count=fn_invoke_count[fn],
-        )
-
-        threshold = 0.50
+        # 1. Ask Module A for a prediction (uses its internal state)
+        pred_prob = mod_a._predict(fn)
+        threshold = mod_a.theta
         pre_warm = pred_prob > threshold
 
-        # Determine ACTUAL cold/warm outcome (for metrics, NOT for prediction)
+        # 2. Determine ACTUAL cold/warm outcome (for metrics, NOT for prediction)
         is_cold_gt = ground_truth_cold.get(key)
         if is_cold_gt is None:
-            # No ground truth label — infer from IAT
+            # Fallback for Azure: determine based on time since last invocation
+            # But wait, we don't have cb_last_invoked tracked easily here.
+            # We can peek at Module A's state which tracks this.
+            state = mod_a._states.get(fn)
+            if state and state.last_invoked_at:
+                dt = t - state.last_invoked_at
+            else:
+                dt = np.inf
             is_cold_gt = dt > baseline_ttl or dt == np.inf
+
+        # 3. Tell Module A what ACTUALLY happened (so it can update its history)
+        mod_a.record_invocation(MockResult(fn, t, is_cold_gt))
+
+        dt_for_log = t - mod_a._states[fn].last_invoked_at if (mod_a._states.get(fn) and len(mod_a._states[fn].history) > 1) else -1
 
         inference_log.append({
             "timestamp": round(t, 4),
             "function": fn,
-            "iat_seconds": round(dt, 2) if dt != np.inf else -1,
+            "iat_seconds": round(dt_for_log, 2),
             "pred_prob": round(pred_prob, 4),
             "threshold": threshold,
             "pre_warm_triggered": pre_warm,
@@ -237,7 +183,8 @@ def simulate_experiment(
 
         if pre_warm and is_cold_gt:
             # TRUE POSITIVE: predicted cold, was cold → pre-warmed successfully
-            cb_idle_cost += min(dt if dt != np.inf else 30.0, 30.0)  # pre-warm keep-alive cost
+            dt_idle = dt_for_log if dt_for_log > 0 else 30.0
+            cb_idle_cost += min(dt_idle, 30.0)  # pre-warm keep-alive cost
             cb_lat = np.random.uniform(2, default_warm_lat * 2)  # near-warm latency
 
         elif pre_warm and not is_cold_gt:
@@ -248,26 +195,27 @@ def simulate_experiment(
         elif not pre_warm and is_cold_gt:
             # FALSE NEGATIVE: missed cold start → must handle it reactively
             cb_cold_starts += 1
-            _ = mod_b.snapshot(fn, f"cont_{i}")
-
-            # Module B: snapshot restore (reduces latency by ~40-55%)
-            snapshot_speedup = np.random.uniform(0.45, 0.60)
-
-            # Module C: edge vs cloud routing
             real_lat = real_latencies.get(key, default_cold_lat)
-            if active_count > 50:
-                tier = mod_c.route(fn)
-                cb_lat = real_lat * snapshot_speedup * 1.1  # cloud fallback
+
+            if mode == "module_a_only":
+                # Module A only: no B/C rescue — full cold start penalty
+                cb_lat = real_lat
             else:
-                tier = "edge"
-                cb_lat = real_lat * snapshot_speedup * 0.9  # edge benefit
+                # Full mode: Module B snapshot + Module C routing
+                _ = mod_b.snapshot(fn, f"cont_{i}")
+                snapshot_speedup = np.random.uniform(0.45, 0.60)
+                if active_count > 50:
+                    tier = mod_c.route(fn)
+                    cb_lat = real_lat * snapshot_speedup * 1.1
+                else:
+                    tier = "edge"
+                    cb_lat = real_lat * snapshot_speedup * 0.9
 
         else:
             # TRUE NEGATIVE: predicted warm, was warm → normal execution
             cb_lat = np.random.uniform(1, default_warm_lat * 2)
 
         recent_starts.append(t)
-        cb_last_invoked[fn] = t
         cb_lats.append(cb_lat)
 
     # ── Compute metrics ──────────────────────────────────────────────────
@@ -297,6 +245,7 @@ def simulate_experiment(
 
     results = {
         "dataset": dataset_name,
+        "mode": mode,
         "n_events": n,
         "n_functions": len(set(e.function_name for e in events)),
         "baseline_cold_starts": base_cold_starts,
@@ -327,97 +276,95 @@ def simulate_experiment(
     return results, inference_log
 
 
-def print_results_table(all_results):
+def print_results_table(all_results, title="ColdBridge Real-World Dataset Experiment Results"):
     """Print a formatted comparison table."""
-    print("\n" + "=" * 100)
-    print("ColdBridge Real-World Dataset Experiment Results")
-    print("=" * 100)
+    print("\n" + "=" * 110)
+    print(title)
+    print("=" * 110)
 
-    header = f"{'Dataset':<18} | {'Metric':<18} | {'Baseline':>14} | {'ColdBridge':>14} | {'Improvement':>14}"
+    header = f"{'Dataset':<18} | {'Mode':<14} | {'Metric':<16} | {'Baseline':>12} | {'ColdBridge':>12} | {'Improv.':>10}"
     print(header)
-    print("-" * 100)
+    print("-" * 110)
 
     for r in all_results:
         name = r["dataset"]
-        print(f"{name:<18} | {'CSR':.<18} | {r['baseline_csr_pct']:>12.2f} % | {r['coldbridge_csr_pct']:>12.2f} % | {r['csr_improvement_pct']:>12.2f} %")
-        print(f"{'':18} | {'P50 Latency':.<18} | {r['baseline_p50_ms']:>10.2f} ms | {r['coldbridge_p50_ms']:>10.2f} ms | {r['p50_improvement_pct']:>12.2f} %")
-        print(f"{'':18} | {'P99 Latency':.<18} | {r['baseline_p99_ms']:>10.2f} ms | {r['coldbridge_p99_ms']:>10.2f} ms | {r['p99_improvement_pct']:>12.2f} %")
-        print(f"{'':18} | {'Idle Cost':.<18} | {r['baseline_idle_cost']:>11.1f} U | {r['coldbridge_idle_cost']:>11.1f} U | {r['idle_cost_improvement_pct']:>12.2f} %")
-        print(f"{'':18} | {'Mod A F1':.<18} | {'n/a':>14} | {r['module_a_f1']:>14.4f} |")
-        print("-" * 100)
+        m = r.get("mode", "full")
+        print(f"{name:<18} | {m:<14} | {'CSR':.<16} | {r['baseline_csr_pct']:>10.2f} % | {r['coldbridge_csr_pct']:>10.2f} % | {r['csr_improvement_pct']:>8.1f} %")
+        print(f"{'':18} | {'':14} | {'P50 Latency':.<16} | {r['baseline_p50_ms']:>9.1f} ms | {r['coldbridge_p50_ms']:>9.1f} ms | {r['p50_improvement_pct']:>8.1f} %")
+        print(f"{'':18} | {'':14} | {'P99 Latency':.<16} | {r['baseline_p99_ms']:>9.1f} ms | {r['coldbridge_p99_ms']:>9.1f} ms | {r['p99_improvement_pct']:>8.1f} %")
+        print(f"{'':18} | {'':14} | {'Mod A F1':.<16} | {'n/a':>12} | {r['module_a_f1']:>12.4f} |")
+        print(f"{'':18} | {'':14} | {'Confusion':.<16} | {'TP='+str(r.get('module_a_tp','?')):>12} | {'FN='+str(r.get('module_a_fn','?')):>12} |")
+        print(f"{'':18} | {'':14} | {'':.<16} | {'FP='+str(r.get('module_a_fp','?')):>12} | {'TN='+str(r.get('module_a_tn','?')):>12} |")
+        print("-" * 110)
 
-    print("=" * 100)
+    print("=" * 110)
+
+
+def _run_dataset(name, loader_fn, mode, max_events=5000):
+    """Helper: load one dataset, run one experiment mode, return result."""
+    loader = loader_fn()
+    if name == "Azure 2019":
+        events = loader.load(max_events=max_events, days=[1])
+        records = loader.load_training_records(days=[1])
+    else:
+        events = loader.load(max_events=max_events)
+        records = (loader.load_training_records(max_records=max_events)
+                   if hasattr(loader.load_training_records, '__code__') and
+                      'max_records' in loader.load_training_records.__code__.co_varnames
+                   else loader.load_training_records())
+    print(f"      Loaded {len(events)} events, {len(records)} training records")
+
+    r, log = simulate_experiment(name, events, records, mode=mode)
+    return r, log, events, records
 
 
 def main():
     out_dir = Path("results/real_data_experiments")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    datasets = [
+        ("Industry 4.0", Industry40ColdStartLoader),
+        ("Zenodo/Huawei", ZenodoHuaweiLoader),
+        ("Azure 2019", AzureFunctions2019Loader),
+    ]
+
+    modes = ["module_a_only", "full"]
     all_results = []
 
-    # ── 1. Industry 4.0 ──────────────────────────────────────────────────
-    print("\n[1/3] Loading Industry 4.0 Cold Start Dataset...")
-    try:
-        loader = Industry40ColdStartLoader()
-        events = loader.load(max_events=5000)
-        records = loader.load_training_records()
-        print(f"      Loaded {len(events)} events, {len(records)} training records")
+    for ds_name, loader_cls in datasets:
+        for mode in modes:
+            tag = f"{ds_name} [{mode}]"
+            print(f"\n{'-'*60}")
+            print(f"  {tag}")
+            print(f"{'-'*60}")
+            try:
+                r, log, _, _ = _run_dataset(ds_name, loader_cls, mode)
+                all_results.append(r)
 
-        r, log = simulate_experiment("Industry 4.0", events, records)
-        all_results.append(r)
-
-        pd.DataFrame(log).to_csv(out_dir / "industry40_inference_log.csv", index=False)
-        print(f"      CSR: {r['baseline_csr_pct']:.1f}% -> {r['coldbridge_csr_pct']:.1f}%  |  "
-              f"P99: {r['baseline_p99_ms']:.0f}ms -> {r['coldbridge_p99_ms']:.0f}ms")
-    except Exception as e:
-        print(f"      SKIPPED: {e}")
-
-    # ── 2. Zenodo/Huawei ─────────────────────────────────────────────────
-    print("\n[2/3] Loading Zenodo/Huawei Production Traces...")
-    try:
-        loader = ZenodoHuaweiLoader()
-        events = loader.load(max_events=5000)
-        records = loader.load_training_records(max_records=5000)
-        print(f"      Loaded {len(events)} events, {len(records)} training records")
-
-        r, log = simulate_experiment("Zenodo/Huawei", events, records)
-        all_results.append(r)
-
-        pd.DataFrame(log).to_csv(out_dir / "zenodo_huawei_inference_log.csv", index=False)
-        print(f"      CSR: {r['baseline_csr_pct']:.1f}% -> {r['coldbridge_csr_pct']:.1f}%  |  "
-              f"P99: {r['baseline_p99_ms']:.0f}ms -> {r['coldbridge_p99_ms']:.0f}ms")
-    except Exception as e:
-        print(f"      SKIPPED: {e}")
-
-    # ── 3. Azure Functions 2019 ──────────────────────────────────────────
-    print("\n[3/3] Loading Azure Functions 2019 Traces...")
-    try:
-        loader = AzureFunctions2019Loader()
-        events = loader.load(max_events=5000, days=[1])
-        records = loader.load_training_records(days=[1])
-        print(f"      Loaded {len(events)} events, {len(records)} training records")
-
-        r, log = simulate_experiment("Azure 2019", events, records)
-        all_results.append(r)
-
-        pd.DataFrame(log).to_csv(out_dir / "azure_2019_inference_log.csv", index=False)
-        print(f"      CSR: {r['baseline_csr_pct']:.1f}% -> {r['coldbridge_csr_pct']:.1f}%  |  "
-              f"P99: {r['baseline_p99_ms']:.0f}ms -> {r['coldbridge_p99_ms']:.0f}ms")
-    except Exception as e:
-        print(f"      SKIPPED: {e}")
+                slug = ds_name.lower().replace("/", "_").replace(" ", "_")
+                pd.DataFrame(log).to_csv(
+                    out_dir / f"{slug}_{mode}_inference_log.csv", index=False
+                )
+                print(f"      CSR: {r['baseline_csr_pct']:.1f}% -> {r['coldbridge_csr_pct']:.1f}%  |  "
+                      f"P99: {r['baseline_p99_ms']:.0f}ms -> {r['coldbridge_p99_ms']:.0f}ms  |  "
+                      f"F1: {r['module_a_f1']:.3f}")
+            except Exception as e:
+                print(f"      SKIPPED: {e}")
 
     # ── Print combined results ────────────────────────────────────────────
-    print_results_table(all_results)
+    a_only = [r for r in all_results if r.get("mode") == "module_a_only"]
+    full   = [r for r in all_results if r.get("mode") == "full"]
+
+    if a_only:
+        print_results_table(a_only, "Module A Only (Prediction — No B/C Fallback)")
+    if full:
+        print_results_table(full, "Full ColdBridge (Module A + B + C)")
 
     # ── Save combined JSON ────────────────────────────────────────────────
     with open(out_dir / "combined_experiment_results.json", "w") as f:
         json.dump(all_results, f, indent=2)
 
     print(f"\nResults saved to {out_dir}/")
-    print(f"  combined_experiment_results.json")
-    for r in all_results:
-        name = r["dataset"].lower().replace("/", "_").replace(" ", "_")
-        print(f"  {name}_inference_log.csv")
 
 
 if __name__ == "__main__":

@@ -402,22 +402,25 @@ class ModuleA:
         X_list, y_list = [], []
         for state in temp_states.values():
             recs = list(state.history)
-            for i in range(SEQ_LEN, len(recs)):
-                seq_recs = recs[i - SEQ_LEN: i]
+            for i in range(1, len(recs)):
+                seq_recs = recs[max(0, i - SEQ_LEN): i]
                 target_rec = recs[i]
                 seq = np.zeros((SEQ_LEN, D_INPUT), dtype=np.float32)
+                # If seq_recs is shorter than SEQ_LEN, place it at the end
+                start_idx = SEQ_LEN - len(seq_recs)
                 for j, (ts, iat, _) in enumerate(seq_recs):
                     t = time.localtime(ts)
-                    seq[j] = encode_step(
+                    seq[start_idx + j] = encode_step(
                         iat, state.memory_mb, state.runtime,
                         t.tm_hour + t.tm_min / 60.0, float(t.tm_wday)
                     )
                 X_list.append(seq)
                 y_list.append(float(target_rec[2]))  # was_cold label
 
-        if len(X_list) < batch_size:
-            logger.warning("Insufficient training samples (%d < %d)", len(X_list), batch_size)
-            return {"error": "insufficient_data", "n_samples": len(X_list)}
+        if len(X_list) < 1:
+            logger.warning("No training samples generated")
+            return {"error": "no_data"}
+        batch_size = min(batch_size, len(X_list))
 
         X = torch.tensor(np.stack(X_list), dtype=torch.float32)
         y = torch.tensor(y_list, dtype=torch.float32)
