@@ -55,8 +55,8 @@ coldbridge/
 ├── coldbridge/               ← Core library
 │   ├── modules/
 │   │   ├── module_a.py       ← Transformer Pre-Warmer        (Youssef) ✓
-│   │   ├── module_b.py       ← Snapshot Registry stub        (Basant)
-│   │   ├── module_c.py       ← Edge-Cloud Orchestrator stub  (Nadira)
+│   │   ├── module_b.py       ← Snapshot Registry             (Basant) ✓
+│   │   ├── module_c.py       ← Edge-Cloud Orchestrator       (Nadira) ✓
 │   │   └── module_d.py       ← Benchmark Harness             (Youssef) ✓
 │   ├── worker/
 │   │   └── pool.py           ← DockerWorkerPool + adapter interface
@@ -121,11 +121,11 @@ three Docker worker images.
 REM ─── Synthetic traces (default) ─────────────────────────────────────
 python -m experiments.run_experiment run --mode baseline --invocations 30
 python -m experiments.run_experiment run --mode module_a --invocations 30
-python -m experiments.run_experiment run --mode full --skip_b --skip_c --invocations 30
+python -m experiments.run_experiment run --mode full --invocations 30
 
 REM ─── Real-world traces ──────────────────────────────────────────────
 python -m experiments.run_experiment run --mode module_a --trace industry40
-python -m experiments.run_experiment run --mode full --trace zenodo --skip_b --skip_c
+python -m experiments.run_experiment run --mode full --trace zenodo
 python -m experiments.run_experiment run --mode baseline --trace azure
 
 REM ─── Run all real-world experiments at once ─────────────────────────
@@ -150,8 +150,8 @@ python -m experiments.run_experiment compare
 | `module_c` | —        | —        | ✓        | Edge routing only                     |
 | `full`     | ✓        | ✓        | ✓        | All modules combined                  |
 
-Add `--skip_b` or `--skip_c` to any mode to disable those stubs while your
-teammates are still implementing.
+Add `--skip_b` or `--skip_c` to any mode to disable those specific modules if you want
+to test them independently or run partial pipelines.
 
 ---
 
