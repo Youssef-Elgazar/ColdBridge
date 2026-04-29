@@ -25,22 +25,26 @@ Real Docker containers on your local machine give:
 
 ### Real-World Dataset Experiment Results
 
-ColdBridge was validated against **3 production cold-start datasets** (Industry 4.0, Huawei Cloud, Azure Functions). Results below compare a standard TTL-based baseline against the full ColdBridge pipeline (Modules A + B + C).
+ColdBridge was validated against **3 production cold-start datasets** (Industry 4.0, Huawei Cloud, Azure Functions). Results below compare a standard TTL-based baseline against the ColdBridge pipeline (Modules A + B + C) using a **blind IAT-based predictor** (no ground-truth label peeking).
 
 | Dataset | Events | Metric | Baseline | ColdBridge | Improvement |
 |---------|--------|--------|----------|------------|-------------|
-| **Industry 4.0** (IEEE JSAS 2024) | 540 | CSR | 6.48% | 0.19% | **97.1%** |
-| | | P99 Latency | 828.4 ms | 5.0 ms | **99.4%** |
-| | | Module A F1 | — | 0.791 | — |
-| **Huawei Cloud** (CCGrid 2026) | 5,000 | CSR | 100.0% | 7.8% | **92.2%** |
-| | | P99 Latency | 10,739 ms | 3,329 ms | **69.0%** |
-| | | Module A F1 | — | 0.959 | — |
+| **Industry 4.0** (IEEE JSAS 2024) | 540 | CSR | 6.48% | 5.56% | **14.3%** |
+| | | P99 Latency | 828 ms | 413 ms | **50.2%** |
+| | | Module A F1 | — | 0.25 | — |
+| **Huawei Cloud** (CCGrid 2026) | 5,000 | CSR | 100.0% | 99.98% | **0.02%** |
+| | | P50 Latency | 10,739 ms | 5,051 ms | **53.0%** |
+| | | P99 Latency | 10,739 ms | 5,781 ms | **46.2%** |
 | **Azure Functions** (ATC 2020) | 5,000 | CSR | 0.02% | 0.00% | **100%** |
-| | | P99 Latency | 9.9 ms | 5.0 ms | **49.9%** |
-| | | Idle Cost | 29,989 U | 5.0 U | **99.98%** |
+| | | P99 Latency | 9.9 ms | 9.9 ms | **0.08%** |
+| | | Idle Cost | 29,982 U | 30 U | **99.9%** |
 
-> **Key findings:** ColdBridge reduces cold start rates by **92–100%** across all datasets and achieves
-> P99 latency improvements of **49–99%**. Module A's F1 score reaches **0.96** on Huawei production traces.
+> **Key findings:** The IAT-based predictor achieves **50% P99 latency reduction** on Industry 4.0
+> hardware-constrained traces and **46–53% improvement** on Huawei production traces through
+> Module B snapshot restore. The Huawei dataset's unusual 100% cold-start pattern (sub-second IATs
+> with container eviction) exposes the predictor's limitations — Module B snapshot restore provides
+> the primary latency benefit there. Azure's near-zero baseline CSR confirms ColdBridge adds
+> minimal overhead on already-warm workloads.
 
 ---
 
