@@ -175,6 +175,14 @@ class MetricsCollector:
         m = self.compute(mode)
         path.parent.mkdir(parents=True, exist_ok=True)
         serialisable = {fn: asdict(rm) for fn, rm in m.items()}
+        if path.exists():
+            try:
+                with open(path, "r") as f:
+                    existing = json.load(f)
+                existing.update(serialisable)
+                serialisable = existing
+            except Exception:
+                pass
         with open(path, "w") as f:
             json.dump(serialisable, f, indent=2)
         return m

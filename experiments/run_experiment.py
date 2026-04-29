@@ -30,7 +30,7 @@ from rich.console import Console
 # Make sure project root is on PYTHONPATH when running as module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from coldbridge.worker.pool import DockerWorkerPool, DEFAULT_FUNCTIONS
+from coldbridge.worker.pool import DockerWorkerPool, DEFAULT_FUNCTIONS, FunctionSpec
 from coldbridge.modules.module_a import ModuleA
 from coldbridge.modules.module_b import ModuleB
 from coldbridge.modules.module_c import ModuleC
@@ -155,8 +155,22 @@ def run(mode, functions, invocations, duration, realtime, trace_source,
         return
 
     trace_fns = sorted({e.function_name for e in events})
+    
+    if trace_source != "synthetic":
+        # Generate FunctionSpec for each unique function in the real trace
+        # Map them all to the lightweight python_fn image
+        fn_specs = []
+        for f_name in trace_fns:
+            fn_specs.append(FunctionSpec(
+                name=f_name,
+                image="coldbridge/python-fn:latest",
+                port=8080,
+                runtime="python",
+                ttl_seconds=ttl,
+            ))
+
     console.print(f"[bold]Mode:[/bold] {mode}  |  "
-                  f"[bold]Functions:[/bold] {trace_fns}  |  "
+                  f"[bold]Functions:[/bold] {trace_fns[:5]}... ({len(trace_fns)} total)  |  "
                   f"[bold]Events:[/bold] {len(events)}\n")
 
     # ── Build worker pool ─────────────────────────────────────────────────

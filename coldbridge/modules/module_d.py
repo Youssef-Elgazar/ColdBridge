@@ -224,8 +224,13 @@ class ModuleD:
         metrics = self._collector.metrics_to_json(out_dir / "metrics.json", self.mode)
 
         summary_lines = self._build_summary(metrics)
-        (out_dir / "summary.txt").write_text("\n".join(summary_lines))
-        console.print(f"\n[green]Results saved → {out_dir}[/green]")
+        summary_file = out_dir / "summary.txt"
+        if summary_file.exists():
+            with open(summary_file, "a", encoding="utf-8") as f:
+                f.write("\n\n--- Appended Run ---\n\n" + "\n".join(summary_lines))
+        else:
+            summary_file.write_text("\n".join(summary_lines), encoding="utf-8")
+        console.print(f"\n[green]Results saved -> {out_dir}[/green]")
         return metrics
 
     def print_summary(self, metrics: Dict[str, RunMetrics]) -> None:
