@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Large data files (download via instructions in README)
+data/azure/azurefunctions-dataset2019.tar.xz
+data/azure/*.csv
+data/zenodo_huawei/lace-rl-artifact.zip
+data/zenodo_huawei/__MACOSX/
+data/zenodo_huawei/lace-rl-artifact/data/demo/invocations.pkl
+data/zenodo_huawei/lace-rl-artifact/checkpoints/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store

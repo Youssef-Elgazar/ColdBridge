@@ -1,0 +1,47 @@
+{
+  "industry40": {
+    "dataset": "industry40",
+    "n_events": 540,
+    "n_cold": 35,
+    "n_warm": 505,
+    "n_functions": 1,
+    "time_span_s": 377700.0,
+    "cold_start_rate": 0.06481481481481481,
+    "cold_p50_ms": 780.0,
+    "cold_p99_ms": 842.66,
+    "cold_mean_ms": 768.8857142857142,
+    "training_records": 540,
+    "module_a_ready": true,
+    "module_a_trainable_fns": 1
+  },
+  "zenodo_huawei": {
+    "dataset": "zenodo_huawei",
+    "n_events": 3000,
+    "n_cold": 3000,
+    "n_warm": 0,
+    "n_functions": 1,
+    "time_span_s": 1101.3640000000596,
+    "cold_start_rate": 1.0,
+    "cold_p50_ms": 10738.591378868934,
+    "cold_p99_ms": 10738.591378868934,
+    "cold_mean_ms": 10738.591378868934,
+    "training_records": 3000,
+    "module_a_ready": true,
+    "module_a_trainable_fns": 1
+  },
+  "azure_2019": {
+    "dataset": "azure_2019",
+    "n_events": 3000,
+    "n_cold": 0,
+    "n_warm": 0,
+    "n_functions": 1,
+    "time_span_s": 17994.933711856298,
+    "cold_start_rate": 0.0,
+    "cold_p50_ms": null,
+    "cold_p99_ms": null,
+    "cold_mean_ms": null,
+    "training_records": 50000,
+    "module_a_ready": true,
+    "module_a_trainable_fns": 4
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "agent": {
+    "obs_dim": 11,
+    "n_actions": 10,
+    "checkpoint": "checkpoints/trained_agent.pth"
+  },
+  "policy": {
+    "keep_alive_options": [1, 5, 10, 30, 60],
+    "regions": ["local", "local"]
+  },
+  "inputs": {
+    "invocations": "data/demo/invocations.pkl",
+    "green_trace": "data/demo/green_trace.pkl",
+    "network_latency_map": "data/demo/network_latency_map.pkl",
+    "cs_latency_dict": "data/demo/cs_latency_dict.pkl"
+  },
+  "eval": {
+    "lambda_carbon": 0.1,
+    "out_dir": "results"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "dataset": "azure_2019",
+  "n_events": 3000,
+  "n_cold": 0,
+  "n_warm": 0,
+  "n_functions": 1,
+  "time_span_s": 17994.933711856298,
+  "cold_start_rate": 0.0,
+  "cold_p50_ms": null,
+  "cold_p99_ms": null,
+  "cold_mean_ms": null,
+  "training_records": 50000,
+  "module_a_ready": true,
+  "module_a_trainable_fns": 4
+}
