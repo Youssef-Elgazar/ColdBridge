@@ -26,3 +26,48 @@ Function: python_fn
   Cold P99     : 543 ms
   Total P50    : 4 ms
   Total P99    : 501 ms
+
+--- Appended Run ---
+
+ColdBridge Experiment Summary
+Mode: baseline
+Timestamp: 2026-04-30 02:23:09
+============================================================
+
+Function: industry40_svc_predict
+  Invocations  : 10
+  Cold starts  : 1 (10.0%)
+  Cold P50     : 1158 ms
+  Cold P99     : 1158 ms
+  Total P50    : 16 ms
+  Total P99    : 1071 ms
+
+--- Appended Run ---
+
+ColdBridge Experiment Summary
+Mode: baseline
+Timestamp: 2026-04-30 02:23:17
+============================================================
+
+Function: huawei_custom-1000-1024-000
+  Invocations  : 10
+  Cold starts  : 1 (10.0%)
+  Cold P50     : 718 ms
+  Cold P99     : 718 ms
+  Total P50    : 23 ms
+  Total P99    : 672 ms
+
+--- Appended Run ---
+
+ColdBridge Experiment Summary
+Mode: baseline
+Timestamp: 2026-04-30 02:23:31
+============================================================
+
+Function: azure_fn_0
+  Invocations  : 10
+  Cold starts  : 1 (10.0%)
+  Cold P50     : 851 ms
+  Cold P99     : 851 ms
+  Total P50    : 25 ms
+  Total P99    : 802 ms
