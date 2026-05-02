@@ -1,0 +1,15 @@
+{
+  "dataset": "zenodo_huawei",
+  "n_events": 3000,
+  "n_cold": 3000,
+  "n_warm": 0,
+  "n_functions": 1,
+  "time_span_s": 1101.3640000000596,
+  "cold_start_rate": 1.0,
+  "cold_p50_ms": 10738.591378868934,
+  "cold_p99_ms": 10738.591378868934,
+  "cold_mean_ms": 10738.591378868934,
+  "training_records": 3000,
+  "module_a_ready": true,
+  "module_a_trainable_fns": 1
+}

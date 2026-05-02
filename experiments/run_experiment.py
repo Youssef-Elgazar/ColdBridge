@@ -36,6 +36,11 @@ from coldbridge.modules.module_b import ModuleB
 from coldbridge.modules.module_c import ModuleC
 from coldbridge.modules.module_d import ModuleD, compare_runs
 from coldbridge.data.trace_loader import SyntheticTraceGenerator
+from coldbridge.data.real_trace_loaders import (
+    Industry40ColdStartLoader,
+    ZenodoHuaweiLoader,
+    AzureFunctions2019Loader,
+)
 
 console = Console()
 
@@ -76,6 +81,11 @@ def cli(ctx):
               help="Trace duration in seconds (overrides --invocations).")
 @click.option("--realtime", is_flag=True, default=False,
               help="Pace invocations to real trace timing (slow but more realistic).")
+@click.option("--trace", "trace_source", default="synthetic",
+              type=click.Choice(["synthetic", "industry40", "zenodo", "azure"]),
+              help="Trace data source: synthetic, industry40, zenodo (Huawei), or azure.")
+@click.option("--max-trace-events", "max_trace_events", default=3000, type=int,
+              help="Max events to load from real traces.")
 @click.option("--skip_b", is_flag=True, default=False, help="Disable Module B.")
 @click.option("--skip_c", is_flag=True, default=False, help="Disable Module C.")
 @click.option("--theta", default=0.45, type=float,
@@ -85,13 +95,13 @@ def cli(ctx):
 @click.option("--seed", default=42, type=int, help="Random seed.")
 @click.option("--out", default=None, type=str,
               help="Output directory (default: results/<timestamp>_<mode>).")
-def run(mode, functions, invocations, duration, realtime,
-        skip_b, skip_c, theta, ttl, seed, out):
+def run(mode, functions, invocations, duration, realtime, trace_source,
+        max_trace_events, skip_b, skip_c, theta, ttl, seed, out):
     """Run a single experiment and save results."""
 
     # ── Output directory ──────────────────────────────────────────────────
     ts = time.strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(out) if out else Path("results") / f"{ts}_{mode}"
+    out_dir = Path(out) if out else Path("results") / f"{ts}_{mode}_{trace_source}"
 
     # ── Function specs ────────────────────────────────────────────────────
     fn_specs = _function_filter(DEFAULT_FUNCTIONS, functions)
@@ -101,33 +111,52 @@ def run(mode, functions, invocations, duration, realtime,
         console.print("[red]No matching function specs. Check --functions.[/red]")
         return
 
-    # ── Generate trace ────────────────────────────────────────────────────
-    gen = SyntheticTraceGenerator(seed=seed)
-    # Scale mean_iat so total events ≈ requested invocation count
-    fn_names = [f.name for f in fn_specs]
-    if duration:
-        dur = duration
-        configs = [
-            {"name": n, "pattern": _pattern_for(n), "mean_iat_s": _iat_for(n)}
-            for n in fn_names
-        ]
-    else:
-        # Adjust duration to hit approximately target invocation count
-        avg_iat = 30.0
-        dur = invocations * avg_iat / max(len(fn_specs), 1)
-        configs = [
-            {"name": n, "pattern": _pattern_for(n),
-             "mean_iat_s": dur / max(invocations // len(fn_specs), 1)}
-            for n in fn_names
-        ]
+    # ── Load or generate trace ────────────────────────────────────────────
+    events = None
 
-    events = gen.generate(duration_seconds=dur, function_configs=configs)
+    if trace_source == "industry40":
+        loader = Industry40ColdStartLoader()
+        events = loader.load(max_events=max_trace_events)
+        console.print(f"\n[bold cyan]Trace source:[/bold cyan] Industry 4.0 Cold Start (IEEE JSAS 2024)")
+
+    elif trace_source == "zenodo":
+        loader = ZenodoHuaweiLoader()
+        events = loader.load(max_events=max_trace_events)
+        console.print(f"\n[bold cyan]Trace source:[/bold cyan] Zenodo/Huawei LACE-RL (CCGrid 2026)")
+
+    elif trace_source == "azure":
+        loader = AzureFunctions2019Loader()
+        events = loader.load(max_events=max_trace_events)
+        console.print(f"\n[bold cyan]Trace source:[/bold cyan] Azure Functions 2019 (ATC 2020)")
+
+    else:
+        # Synthetic trace (original behaviour)
+        gen = SyntheticTraceGenerator(seed=seed)
+        fn_names = [f.name for f in fn_specs]
+        if duration:
+            dur = duration
+            configs = [
+                {"name": n, "pattern": _pattern_for(n), "mean_iat_s": _iat_for(n)}
+                for n in fn_names
+            ]
+        else:
+            avg_iat = 30.0
+            dur = invocations * avg_iat / max(len(fn_specs), 1)
+            configs = [
+                {"name": n, "pattern": _pattern_for(n),
+                 "mean_iat_s": dur / max(invocations // len(fn_specs), 1)}
+                for n in fn_names
+            ]
+        events = gen.generate(duration_seconds=dur, function_configs=configs)
+        console.print(f"\n[bold cyan]Trace source:[/bold cyan] Synthetic (seed={seed})")
+
     if not events:
-        console.print("[red]No events generated. Try increasing --duration or --invocations.[/red]")
+        console.print("[red]No events loaded. Check your trace files or try increasing --invocations.[/red]")
         return
 
-    console.print(f"\n[bold]Mode:[/bold] {mode}  |  "
-                  f"[bold]Functions:[/bold] {[f.name for f in fn_specs]}  |  "
+    trace_fns = sorted({e.function_name for e in events})
+    console.print(f"[bold]Mode:[/bold] {mode}  |  "
+                  f"[bold]Functions:[/bold] {trace_fns}  |  "
                   f"[bold]Events:[/bold] {len(events)}\n")
 
     # ── Build worker pool ─────────────────────────────────────────────────

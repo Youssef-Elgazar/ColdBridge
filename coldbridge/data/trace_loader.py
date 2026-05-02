@@ -15,12 +15,15 @@ Both produce a list of InvocationEvent objects consumed by Module D's harness.
 
 from __future__ import annotations
 
+import logging
 import math
 import random
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 import numpy as np
+
+logger = logging.getLogger("coldbridge.trace_loader")
 
 
 @dataclass
@@ -29,6 +32,23 @@ class InvocationEvent:
     function_name: str
     scheduled_at: float          # seconds from trace start
     expected_pattern: str = ""   # "periodic" | "bursty" | "rare" — metadata only
+
+    # ── Real-world trace metadata (optional) ──────────────────────────────
+    was_cold: Optional[bool] = None            # Ground-truth cold start label
+    cold_start_latency_ms: Optional[float] = None  # Measured cold start latency
+    runtime: Optional[str] = None              # "python" | "node" | "java" etc.
+
+
+@dataclass
+class ColdStartRecord:
+    """Standardised training record for Module A's cold start predictor."""
+    function_name: str
+    timestamp: float                           # absolute or relative timestamp
+    was_cold: bool = False                     # ground-truth label
+    cold_start_latency_ms: float = 0.0         # measured latency in ms
+    inter_arrival_time_s: float = 0.0          # time since previous invocation
+    memory_mb: Optional[float] = None          # function memory allocation
+    runtime: Optional[str] = None              # language runtime
 
 
 class SyntheticTraceGenerator:
