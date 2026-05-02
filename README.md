@@ -8,7 +8,7 @@
 
 ColdBridge is a **High-Fidelity Research Platform** for measuring and mitigating the cold start
 problem in serverless/FaaS environments. Unlike traditional simulation-based approaches, it integrates
-Chronos-2 TSFM prediction, eBPF-driven behavioral fingerprinting, and Osprey-informed geographic routing
+eBPF-driven behavioral fingerprinting, and Osprey-informed geographic routing
 to orchestrate **real Docker and Firecracker containers** as worker instances. It provides genuine
 end-to-end latency validation for high-fidelity edge-cloud systems.
 

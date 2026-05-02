@@ -1,0 +1,40 @@
+ColdBridge Experiment Summary
+Mode: full
+Timestamp: 2026-04-21 11:07:54
+============================================================
+
+Function: java_fn
+  Invocations  : 5
+  Cold starts  : 1 (20.0%)
+  Cold P50     : 625 ms
+  Cold P99     : 625 ms
+  Total P50    : 25 ms
+  Total P99    : 624 ms
+  Pred Precision: 0.000
+  Pred Recall   : 0.000
+  Pred F1       : 0.000
+  Pre-warms     : 1
+
+Function: node_fn
+  Invocations  : 64
+  Cold starts  : 1 (1.6%)
+  Cold P50     : 808 ms
+  Cold P99     : 808 ms
+  Total P50    : 27 ms
+  Total P99    : 331 ms
+  Pred Precision: 0.000
+  Pred Recall   : 0.000
+  Pred F1       : 0.000
+  Pre-warms     : 1
+
+Function: python_fn
+  Invocations  : 10
+  Cold starts  : 1 (10.0%)
+  Cold P50     : 790 ms
+  Cold P99     : 790 ms
+  Total P50    : 26 ms
+  Total P99    : 736 ms
+  Pred Precision: 0.000
+  Pred Recall   : 0.000
+  Pred F1       : 0.000
+  Pre-warms     : 1

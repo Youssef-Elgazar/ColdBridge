@@ -1,0 +1,4 @@
+timestamp,function_name,predicted_prob,threshold,decision,ground_truth
+1776762472.2659793,python_fn,0.5147426128387451,0.45,prewarm,False
+1776762472.9648342,java_fn,0.5151569247245789,0.45,prewarm,False
+1776762473.6685774,node_fn,0.5129125714302063,0.45,prewarm,False

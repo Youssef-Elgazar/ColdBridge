@@ -1,0 +1,28 @@
+ColdBridge Experiment Summary
+Mode: baseline
+Timestamp: 2026-04-21 11:07:00
+============================================================
+
+Function: java_fn
+  Invocations  : 5
+  Cold starts  : 1 (20.0%)
+  Cold P50     : 1541 ms
+  Cold P99     : 1541 ms
+  Total P50    : 24 ms
+  Total P99    : 1487 ms
+
+Function: node_fn
+  Invocations  : 64
+  Cold starts  : 1 (1.6%)
+  Cold P50     : 1819 ms
+  Cold P99     : 1819 ms
+  Total P50    : 16 ms
+  Total P99    : 702 ms
+
+Function: python_fn
+  Invocations  : 10
+  Cold starts  : 1 (10.0%)
+  Cold P50     : 1384 ms
+  Cold P99     : 1384 ms
+  Total P50    : 23 ms
+  Total P99    : 1278 ms
