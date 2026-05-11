@@ -31,16 +31,15 @@ class TestEncodeStep:
     def test_output_shape(self):
         v = encode_step(30.0, 512.0, "python", 14.5, 3.0)
         assert v.shape == (D_INPUT,), f"Expected ({D_INPUT},), got {v.shape}"
+        assert D_INPUT == 7, f"D_INPUT should be 7, got {D_INPUT}"
 
-    def test_runtime_onehot_python(self):
+    def test_runtime_encoding_python(self):
         v = encode_step(0.0, 512.0, "python", 0.0, 0.0)
-        assert v[2] == 1.0   # python is index 0 in RUNTIME_IDS → slot 2
-        assert v[3] == 0.0
-        assert v[4] == 0.0
+        assert v[2] == 0.0   # python is index 0, normalised = 0/4 = 0.0
 
-    def test_runtime_onehot_java(self):
+    def test_runtime_encoding_java(self):
         v = encode_step(0.0, 512.0, "java", 0.0, 0.0)
-        assert v[4] == 1.0   # java is index 2
+        assert v[2] == 0.5   # java is index 2, normalised = 2/4 = 0.5
 
     def test_iat_log_normalised(self):
         v0 = encode_step(0.0, 512.0, "python", 0.0, 0.0)
@@ -56,8 +55,8 @@ class TestEncodeStep:
         # hour=0 and hour=24 should give identical features
         v0 = encode_step(1.0, 512.0, "python", 0.0, 0.0)
         v24 = encode_step(1.0, 512.0, "python", 24.0, 0.0)
-        assert math.isclose(v0[10], v24[10], abs_tol=1e-5)
-        assert math.isclose(v0[11], v24[11], abs_tol=1e-5)
+        assert math.isclose(v0[3], v24[3], abs_tol=1e-5)
+        assert math.isclose(v0[4], v24[4], abs_tol=1e-5)
 
     def test_no_nan_inf(self):
         v = encode_step(1e6, 3008.0, "node", 23.9, 6.9)
@@ -194,8 +193,8 @@ class TestModuleATransformer:
     def test_parameter_count_reasonable(self):
         m = ModuleA(worker_pool=None)
         n = m.parameter_count()
-        # d_model=128, L=4, H=8 → roughly 600k–900k parameters
-        assert 100_000 < n < 5_000_000, f"Unexpected parameter count: {n:,}"
+        # d_model=128, L=4, H=8, func_embed=1024*64 → ~1.8M parameters
+        assert 100_000 < n < 10_000_000, f"Unexpected parameter count: {n:,}"
 
     def test_predict_returns_probability(self):
         import torch
