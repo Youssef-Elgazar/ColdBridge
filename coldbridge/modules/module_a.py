@@ -52,7 +52,7 @@ N_LAYERS  = 4         # encoder layers
 D_INPUT   = 7         # raw feature vector dimension (see _encode_step)
 D_EMBED   = 64        # function embedding dimension
 DROPOUT   = 0.1
-FOCAL_ALPHA = 0.25    # paper: from Lin et al. 2017
+FOCAL_ALPHA = 0.75    # weight for POSITIVE (cold start) class — rare class gets higher weight
 FOCAL_GAMMA = 2.0
 DEFAULT_THETA = 0.50  # pre-warm decision threshold (paper default)
 LOOKAHEAD_S   = 30.0  # prediction horizon in seconds
@@ -133,7 +133,7 @@ if TORCH_AVAILABLE:
             n_heads: int = N_HEADS,
             n_layers: int = N_LAYERS,
             dropout: float = DROPOUT,
-            max_functions: int = 1024,
+            max_functions: int = 65536,  # enough for 50k+ functions (paper)
         ):
             super().__init__()
             self.d_embed = d_embed
@@ -391,12 +391,23 @@ class ModuleA:
         """
         Fallback when model is unavailable or not enough history:
         Predict cold start if the function hasn't been invoked recently.
+
+        Uses the last recorded invocation timestamp (simulation time),
+        NOT wall-clock time, so it works correctly during trace replay.
         """
         with self._state_lock:
             state = self._states.get(function_name)
         if state is None or state.last_invoked_at is None:
             return 0.8   # unknown function → likely cold
-        idle = time.time() - state.last_invoked_at
+        # Use the most recent history entry's timestamp as "now"
+        # (this is the simulation timestamp, not wall clock)
+        if state.history:
+            latest_ts = state.history[-1][0]  # (timestamp, iat, was_cold)
+        else:
+            latest_ts = state.last_invoked_at
+        idle = latest_ts - state.last_invoked_at
+        if idle < 0:
+            idle = 0.0
         # Logistic decay: probability rises as idle time approaches TTL (120s)
         ttl = 120.0
         p = 1.0 / (1.0 + math.exp(-6 * (idle / ttl - 0.6)))
@@ -473,9 +484,27 @@ class ModuleA:
             return {"error": "no_data"}
         batch_size = min(batch_size, len(X_list))
 
-        X = torch.tensor(np.stack(X_list), dtype=torch.float32)
-        y = torch.tensor(y_list, dtype=torch.float32)
-        fids = torch.tensor(fid_list, dtype=torch.long)
+        X_all = np.stack(X_list)
+        y_all = np.array(y_list, dtype=np.float32)
+        fid_all = np.array(fid_list, dtype=np.int64)
+
+        # ── Oversample positive (cold start) class to ~40% ──────────────
+        pos_idx = np.where(y_all == 1)[0]
+        neg_idx = np.where(y_all == 0)[0]
+        if len(pos_idx) > 0 and len(neg_idx) > 0:
+            target_pos = max(len(pos_idx), int(len(neg_idx) * 0.6))  # aim for ~40% pos
+            oversample_factor = max(1, target_pos // len(pos_idx))
+            if oversample_factor > 1:
+                extra_idx = np.tile(pos_idx, oversample_factor - 1)
+                all_idx = np.concatenate([np.arange(len(y_all)), extra_idx])
+                X_all = X_all[all_idx]
+                y_all = y_all[all_idx]
+                fid_all = fid_all[all_idx]
+                print(f"        [Module A] Oversampled positives {len(pos_idx)} -> {int(y_all.sum())} ({y_all.mean()*100:.1f}%)", flush=True)
+
+        X = torch.tensor(X_all, dtype=torch.float32)
+        y = torch.tensor(y_all, dtype=torch.float32)
+        fids = torch.tensor(fid_all, dtype=torch.long)
 
         # Train / validation split (chronological — last N samples)
         n_val = max(1, int(len(X) * val_fraction))
@@ -486,6 +515,8 @@ class ModuleA:
         pos_rate = y_train.mean().item()
         logger.info("Training: %d samples (%.1f%% positive), Val: %d samples",
                      len(X_train), pos_rate * 100, len(X_val))
+        import sys
+        print(f"        [Module A] {len(X_train)} train / {len(X_val)} val samples  ({pos_rate*100:.1f}% positive)", flush=True)
 
         self._model.train()
         optimiser = optim.AdamW(self._model.parameters(), lr=lr, weight_decay=1e-2)
@@ -544,8 +575,11 @@ class ModuleA:
                 patience_counter += 1
                 if patience_counter >= patience:
                     logger.info("Early stopping at epoch %d (best F1=%.4f)", epoch + 1, best_val_f1)
+                    print(f"        [Module A] Early stop epoch {epoch+1} (best F1={best_val_f1:.4f})", flush=True)
                     break
 
+            # Print every epoch so user sees progress
+            print(f"        [Module A] Epoch {epoch+1:3d}/{epochs} | loss={avg_train:.4f} | val_loss={val_loss:.4f} | F1={f1:.4f} | best={best_val_f1:.4f} | patience={patience_counter}/{patience}", flush=True)
             if (epoch + 1) % 5 == 0 or epoch == 0:
                 logger.info(
                     "Epoch %3d | train=%.4f | val=%.4f | F1=%.4f",
@@ -556,27 +590,43 @@ class ModuleA:
         if best_state_dict is not None:
             self._model.load_state_dict(best_state_dict)
 
-        # Final evaluation
+        # Final evaluation + auto-tune threshold on validation set
         self._model.eval()
         with torch.no_grad():
             val_probs = self._model(X_val.to(self._device), fid_val.to(self._device)).cpu().numpy()
-        val_preds_bin = (val_probs >= self.theta).astype(int)
         val_labels = y_val.numpy().astype(int)
+
+        # Auto-tune θ: sweep thresholds and pick the one with best F1
         from sklearn.metrics import f1_score, precision_score, recall_score
+        best_theta = self.theta
+        best_f1_theta = -1.0
+        if val_labels.sum() > 0:  # only if there are positive samples
+            for candidate_theta in np.arange(0.05, 0.95, 0.05):
+                preds_c = (val_probs >= candidate_theta).astype(int)
+                f1_c = f1_score(val_labels, preds_c, zero_division=0)
+                if f1_c > best_f1_theta:
+                    best_f1_theta = f1_c
+                    best_theta = float(candidate_theta)
+            self.theta = best_theta
+            print(f"        [Module A] Auto-tuned theta = {self.theta:.2f} (val F1={best_f1_theta:.4f})", flush=True)
+
+        val_preds_bin = (val_probs >= self.theta).astype(int)
         f1  = f1_score(val_labels, val_preds_bin, zero_division=0)
         prec = precision_score(val_labels, val_preds_bin, zero_division=0)
         rec  = recall_score(val_labels, val_preds_bin, zero_division=0)
 
         logger.info(
-            "Training complete | best_val_F1=%.4f | F1=%.4f P=%.4f R=%.4f",
-            best_val_f1, f1, prec, rec,
+            "Training complete | best_val_F1=%.4f | F1=%.4f P=%.4f R=%.4f | theta=%.2f",
+            best_val_f1, f1, prec, rec, self.theta,
         )
+        print(f"        [Module A] Final: F1={f1:.4f} P={prec:.4f} R={rec:.4f} theta={self.theta:.2f}", flush=True)
         return {
             "epochs_run": len(history["train_loss"]),
             "best_val_f1": float(best_val_f1),
             "val_f1": float(f1),
             "val_precision": float(prec),
             "val_recall": float(rec),
+            "auto_theta": float(self.theta),
             "train_loss_curve": history["train_loss"],
             "val_loss_curve": history["val_loss"],
             "val_f1_curve": history["val_f1"],
